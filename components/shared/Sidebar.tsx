@@ -1,9 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname, useRouter } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
-import { LayoutDashboard, FileText, Users, LogOut } from 'lucide-react'
+import { usePathname } from 'next/navigation'
+import { LayoutDashboard, FileText, Users } from 'lucide-react'
 import { clsx } from 'clsx'
 
 interface Props {
@@ -18,13 +17,6 @@ const navItems = [
 
 export default function Sidebar({ user }: Props) {
   const pathname = usePathname()
-  const router = useRouter()
-
-  async function handleLogout() {
-    const supabase = createClient()
-    await supabase.auth.signOut()
-    router.push('/auth/login')
-  }
 
   return (
     <aside className="fixed left-0 top-0 h-full w-60 bg-gray-900 text-white flex flex-col">
@@ -51,15 +43,8 @@ export default function Sidebar({ user }: Props) {
       </nav>
 
       <div className="px-4 py-4 border-t border-gray-700">
-        <p className="text-xs text-gray-400 mb-1 truncate">{user.name}</p>
-        <p className="text-xs text-gray-500 mb-3 truncate">{user.email}</p>
-        <button
-          onClick={handleLogout}
-          className="flex items-center gap-2 text-gray-400 hover:text-white text-sm transition-colors"
-        >
-          <LogOut size={16} />
-          ログアウト
-        </button>
+        <p className="text-xs text-gray-400 truncate">{user.name}</p>
+        <p className="text-xs text-gray-500 mt-0.5 truncate">{user.email}</p>
       </div>
     </aside>
   )
