@@ -22,7 +22,7 @@ export default function PDFDownloadButton({ estimate, items }: Props) {
       const { createElement } = await import('react')
 
       const blob = await pdf(
-        createElement(EstimatePDF, { estimate, items })
+        createElement(EstimatePDF, { estimate, items }) as any
       ).toBlob()
 
       // blobからダウンロードリンクを生成してクリック
