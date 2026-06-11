@@ -9,11 +9,12 @@ import {
 } from '@react-pdf/renderer'
 import { CATEGORY_LABELS, type ItemCategory } from '@/types'
 
-// ※ @react-pdf/renderer はデフォルトで英数字フォント内蔵
-// 日本語は文字化けを避けるため、外部フォントなしで動作させる
+// フォントは PDFDownloadButton 側で Font.register() 済み
+const FONT = 'NotoSansJP'
 
 const styles = StyleSheet.create({
   page: {
+    fontFamily: FONT,
     fontSize: 9,
     paddingTop: 40,
     paddingBottom: 50,
