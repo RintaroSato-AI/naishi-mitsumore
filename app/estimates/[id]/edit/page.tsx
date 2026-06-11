@@ -5,8 +5,7 @@ import { useRouter, useParams } from 'next/navigation'
 import { useForm, useFieldArray } from 'react-hook-form'
 import { PlusCircle, Save, ChevronLeft } from 'lucide-react'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
-import { type EstimateFormData, type Customer } from '@/types'
+import { type EstimateFormData } from '@/types'
 import { calcTotals } from '@/lib/utils/estimate'
 import ItemRow from '@/components/estimates/ItemRow'
 import TotalSummary from '@/components/estimates/TotalSummary'
@@ -25,10 +24,8 @@ export default function EditEstimatePage() {
   const router = useRouter()
   const params = useParams()
   const id = params.id as string
-  const [customers, setCustomers] = useState<Customer[]>([])
-  const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+  const [saving, setSaving] = useState(false)
 
   const { register, control, handleSubmit, watch, setValue, reset, formState: { errors } } =
     useForm<EstimateFormData>({ defaultValues: { items: [{ ...DEFAULT_ITEM }] } })
@@ -39,78 +36,60 @@ export default function EditEstimatePage() {
   const { subtotal, taxAmount, total } = calcTotals(watchItems || [], Number(taxRate))
 
   useEffect(() => {
-    const supabase = createClient()
-    Promise.all([
-      supabase.from('customers').select('*').order('name'),
-      supabase.from('estimates').select('*, customers(*)').eq('id', id).single(),
-      supabase.from('estimate_items').select('*').eq('estimate_id', id).order('sort_order'),
-    ]).then(([{ data: custs }, { data: est }, { data: items }]) => {
-      if (custs) setCustomers(custs as Customer[])
-      if (est) {
-        reset({
-          customer_id: est.customer_id ?? undefined,
-          title: est.title,
-          issue_date: est.issue_date,
-          expiry_date: est.expiry_date,
-          tax_rate: est.tax_rate,
-          notes: est.notes ?? '',
-          items: items?.map(item => ({
-            category: item.category,
-            item_name: item.item_name,
-            spec: item.spec ?? '',
-            unit: item.unit,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-            notes: item.notes ?? '',
-          })) ?? [{ ...DEFAULT_ITEM }],
-        })
-      }
-      setLoading(false)
-    })
-  }, [id, reset])
-
-  async function onSubmit(data: EstimateFormData) {
-    setSaving(true)
-    setError(null)
-    try {
-      const supabase = createClient()
-      const { error: estErr } = await supabase
-        .from('estimates')
-        .update({
-          customer_id: data.customer_id || null,
-          title: data.title,
-          issue_date: data.issue_date,
-          expiry_date: data.expiry_date,
-          notes: data.notes,
-          subtotal,
-          tax_rate: data.tax_rate,
-          tax_amount: taxAmount,
-          total_amount: total,
-        })
-        .eq('id', id)
-      if (estErr) throw estErr
-
-      // 明細を全削除→再挿入
-      await supabase.from('estimate_items').delete().eq('estimate_id', id)
-      const items = data.items.map((item, i) => ({
-        estimate_id: id,
-        sort_order: i,
+    const stored = JSON.parse(localStorage.getItem('estimates') || '[]')
+    const est = stored.find((e: any) => e.id === id)
+    if (!est) { router.push('/estimates'); return }
+    reset({
+      customer_name: est.customer_name,
+      customer_address: est.customer_address,
+      customer_phone: est.customer_phone,
+      title: est.title,
+      issue_date: est.issue_date,
+      expiry_date: est.expiry_date,
+      tax_rate: est.tax_rate,
+      notes: est.notes,
+      items: est.items?.map((item: any) => ({
         category: item.category,
         item_name: item.item_name,
-        spec: item.spec || null,
+        spec: item.spec || '',
         unit: item.unit,
         quantity: item.quantity,
         unit_price: item.unit_price,
-        notes: item.notes || null,
-      }))
-      const { error: itemsErr } = await supabase.from('estimate_items').insert(items)
-      if (itemsErr) throw itemsErr
+        notes: item.notes || '',
+      })) ?? [{ ...DEFAULT_ITEM }],
+    })
+    setLoading(false)
+  }, [id, reset])
 
-      router.push(`/estimates/${id}`)
-    } catch (e: any) {
-      setError(e.message || '更新に失敗しました')
-      setSaving(false)
-    }
+  function onSubmit(data: EstimateFormData) {
+    setSaving(true)
+    const stored = JSON.parse(localStorage.getItem('estimates') || '[]')
+    const updated = stored.map((e: any) =>
+      e.id === id
+        ? {
+            ...e,
+            customer_name: data.customer_name || '',
+            customer_address: data.customer_address || '',
+            customer_phone: data.customer_phone || '',
+            title: data.title,
+            issue_date: data.issue_date,
+            expiry_date: data.expiry_date,
+            notes: data.notes || '',
+            tax_rate: data.tax_rate,
+            subtotal,
+            tax_amount: taxAmount,
+            total_amount: total,
+            items: data.items.map((item, i) => ({
+              id: e.items?.[i]?.id || Date.now().toString(36) + i,
+              sort_order: i,
+              ...item,
+              amount: Math.round(item.quantity * item.unit_price),
+            })),
+          }
+        : e
+    )
+    localStorage.setItem('estimates', JSON.stringify(updated))
+    router.push(`/estimates/${id}`)
   }
 
   if (loading) return <div className="text-center py-20 text-gray-400">読み込み中...</div>
@@ -133,11 +112,12 @@ export default function EditEstimatePage() {
               <input {...register('title', { required: true })} className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
             </div>
             <div className="col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">顧客</label>
-              <select {...register('customer_id')} className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white">
-                <option value="">（顧客なし）</option>
-                {customers.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
+              <label className="block text-sm font-medium text-gray-700 mb-2">顧客情報</label>
+              <div className="grid grid-cols-3 gap-3">
+                <input {...register('customer_name')} placeholder="顧客名" className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+                <input {...register('customer_address')} placeholder="住所" className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+                <input {...register('customer_phone')} placeholder="電話番号" className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm" />
+              </div>
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">発行日</label>
@@ -192,8 +172,6 @@ export default function EditEstimatePage() {
             <TotalSummary subtotal={subtotal} taxRate={Number(taxRate)} taxAmount={taxAmount} total={total} />
           </div>
         </section>
-
-        {error && <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">{error}</div>}
 
         <div className="flex justify-end gap-3 pb-8">
           <Link href={`/estimates/${id}`} className="px-5 py-2.5 rounded-lg border border-gray-300 text-gray-600 hover:bg-gray-50 text-sm font-medium transition-colors">キャンセル</Link>

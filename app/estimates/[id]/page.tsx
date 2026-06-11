@@ -1,43 +1,60 @@
-import { notFound } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
+'use client'
+
+import { useEffect, useState } from 'react'
+import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
-import {
-  ChevronLeft, Pencil, Send, CheckCircle, XCircle, Clock
-} from 'lucide-react'
+import { ChevronLeft, Pencil, Send, CheckCircle, XCircle } from 'lucide-react'
 import {
   STATUS_LABELS, STATUS_COLORS, CATEGORY_LABELS,
-  type EstimateStatus, type ItemCategory, type Estimate, type EstimateItem
+  type EstimateStatus, type ItemCategory,
 } from '@/types'
 import { formatCurrency, formatDate } from '@/lib/utils/estimate'
 import PDFDownloadButton from '@/components/pdf/PDFDownloadButton'
 
-interface Props {
-  params: { id: string }
-}
+export default function EstimateDetailPage() {
+  const params = useParams()
+  const router = useRouter()
+  const [estimate, setEstimate] = useState<any>(null)
 
-export default async function EstimateDetailPage({ params }: Props) {
-  const supabase = createClient()
+  useEffect(() => {
+    const stored = JSON.parse(localStorage.getItem('estimates') || '[]')
+    const found = stored.find((e: any) => e.id === params.id)
+    if (!found) router.push('/estimates')
+    else setEstimate(found)
+  }, [params.id])
 
-  const { data: est } = await supabase
-    .from('estimates')
-    .select('*, customers(*), profiles:created_by(name)')
-    .eq('id', params.id)
-    .single()
+  function updateStatus(newStatus: string) {
+    const stored = JSON.parse(localStorage.getItem('estimates') || '[]')
+    const updated = stored.map((e: any) =>
+      e.id === params.id ? { ...e, status: newStatus } : e
+    )
+    localStorage.setItem('estimates', JSON.stringify(updated))
+    setEstimate((prev: any) => ({ ...prev, status: newStatus }))
+  }
 
-  if (!est) notFound()
+  if (!estimate) return <div className="text-center py-20 text-gray-400">読み込み中...</div>
 
-  const { data: items } = await supabase
-    .from('estimate_items')
-    .select('*')
-    .eq('estimate_id', params.id)
-    .order('sort_order')
+  const items = estimate.items || []
 
-  const estimate = est as any as Estimate
-  const estimateItems = (items ?? []) as EstimateItem[]
+  // PDF用にEstimate型へ変換
+  const estimateForPDF = {
+    ...estimate,
+    customer: {
+      id: '',
+      name: estimate.customer_name || '',
+      address: estimate.customer_address,
+      phone: estimate.customer_phone,
+      created_at: '',
+      updated_at: '',
+    },
+    tax_rate: Number(estimate.tax_rate),
+    subtotal: Number(estimate.subtotal),
+    tax_amount: Number(estimate.tax_amount),
+    total_amount: Number(estimate.total_amount),
+  }
 
   return (
     <div className="max-w-5xl mx-auto">
-      {/* ヘッダー */}
       <div className="flex items-start justify-between mb-6">
         <div className="flex items-center gap-3">
           <Link href="/estimates" className="text-gray-400 hover:text-gray-700 transition-colors">
@@ -45,33 +62,58 @@ export default async function EstimateDetailPage({ params }: Props) {
           </Link>
           <div>
             <div className="flex items-center gap-2 mb-1">
-              <span className="font-mono text-gray-500 text-sm">{est.estimate_number}</span>
-              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[est.status as EstimateStatus]}`}>
-                {STATUS_LABELS[est.status as EstimateStatus]}
+              <span className="font-mono text-gray-500 text-sm">{estimate.estimate_number}</span>
+              <span className={`px-2 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[estimate.status as EstimateStatus]}`}>
+                {STATUS_LABELS[estimate.status as EstimateStatus]}
               </span>
             </div>
-            <h1 className="text-xl font-bold text-gray-900">{est.title}</h1>
+            <h1 className="text-xl font-bold text-gray-900">{estimate.title}</h1>
           </div>
         </div>
 
         <div className="flex gap-2 flex-wrap justify-end">
-          <PDFDownloadButton estimate={estimate} items={estimateItems} />
-          <StatusActions estimateId={params.id} currentStatus={est.status as EstimateStatus} />
+          <PDFDownloadButton estimate={estimateForPDF} items={items} />
+          {estimate.status === 'draft' && (
+            <button
+              onClick={() => updateStatus('sent')}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              <Send size={15} /> 送付済みにする
+            </button>
+          )}
+          {estimate.status === 'sent' && (
+            <div className="flex gap-2">
+              <button onClick={() => updateStatus('approved')} className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors">
+                <CheckCircle size={15} /> 承認
+              </button>
+              <button onClick={() => updateStatus('rejected')} className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors">
+                <XCircle size={15} /> 却下
+              </button>
+            </div>
+          )}
           <Link
-            href={`/estimates/${params.id}/edit`}
+            href={`/estimates/${estimate.id}/edit`}
             className="flex items-center gap-2 border border-gray-300 text-gray-700 hover:bg-gray-50 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           >
-            <Pencil size={15} />
-            編集
+            <Pencil size={15} /> 編集
           </Link>
         </div>
       </div>
 
       {/* 詳細カード */}
       <div className="grid grid-cols-3 gap-4 mb-6">
-        <InfoCard label="顧客名" value={(est.customers as any)?.name ?? '—'} />
-        <InfoCard label="発行日" value={formatDate(est.issue_date)} />
-        <InfoCard label="有効期限" value={formatDate(est.expiry_date)} />
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <p className="text-xs text-gray-500 mb-1">顧客名</p>
+          <p className="font-semibold text-gray-900">{estimate.customer_name || '—'}</p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <p className="text-xs text-gray-500 mb-1">発行日</p>
+          <p className="font-semibold text-gray-900">{formatDate(estimate.issue_date)}</p>
+        </div>
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
+          <p className="text-xs text-gray-500 mb-1">有効期限</p>
+          <p className="font-semibold text-gray-900">{formatDate(estimate.expiry_date)}</p>
+        </div>
       </div>
 
       {/* 明細テーブル */}
@@ -94,7 +136,7 @@ export default async function EstimateDetailPage({ params }: Props) {
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-50">
-              {estimateItems.map((item, i) => (
+              {items.map((item: any, i: number) => (
                 <tr key={item.id} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50/50'}>
                   <td className="px-4 py-3 text-center text-gray-400">{i + 1}</td>
                   <td className="px-4 py-3">
@@ -103,18 +145,13 @@ export default async function EstimateDetailPage({ params }: Props) {
                     </span>
                   </td>
                   <td className="px-4 py-3 font-medium text-gray-800">{item.item_name}</td>
-                  <td className="px-4 py-3 text-gray-500 text-xs">{item.spec ?? '—'}</td>
+                  <td className="px-4 py-3 text-gray-500 text-xs">{item.spec || '—'}</td>
                   <td className="px-4 py-3 text-center text-gray-600">{item.unit}</td>
                   <td className="px-4 py-3 text-right text-gray-700">{item.quantity}</td>
                   <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(item.unit_price)}</td>
                   <td className="px-4 py-3 text-right font-semibold text-gray-900">{formatCurrency(item.amount)}</td>
                 </tr>
               ))}
-              {!estimateItems.length && (
-                <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-400">明細がありません</td>
-                </tr>
-              )}
             </tbody>
           </table>
         </div>
@@ -125,78 +162,27 @@ export default async function EstimateDetailPage({ params }: Props) {
             <div className="w-64 space-y-2">
               <div className="flex justify-between text-sm text-gray-600">
                 <span>小計</span>
-                <span>{formatCurrency(est.subtotal)}</span>
+                <span>{formatCurrency(estimate.subtotal)}</span>
               </div>
               <div className="flex justify-between text-sm text-gray-600">
-                <span>消費税（{Math.round(est.tax_rate * 100)}%）</span>
-                <span>{formatCurrency(est.tax_amount)}</span>
+                <span>消費税（{Math.round(estimate.tax_rate * 100)}%）</span>
+                <span>{formatCurrency(estimate.tax_amount)}</span>
               </div>
               <div className="flex justify-between font-bold text-lg border-t border-gray-200 pt-2">
                 <span>合計金額</span>
-                <span className="text-blue-700">{formatCurrency(est.total_amount)}</span>
+                <span className="text-blue-700">{formatCurrency(estimate.total_amount)}</span>
               </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* 備考 */}
-      {est.notes && (
+      {estimate.notes && (
         <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6 mb-6">
           <h2 className="font-semibold text-gray-800 mb-2">備考・特記事項</h2>
-          <p className="text-sm text-gray-600 whitespace-pre-wrap">{est.notes}</p>
+          <p className="text-sm text-gray-600 whitespace-pre-wrap">{estimate.notes}</p>
         </div>
       )}
-
-      {/* メタ情報 */}
-      <div className="text-xs text-gray-400 text-right">
-        作成者: {(est.profiles as any)?.name ?? '—'}
-      </div>
     </div>
   )
-}
-
-function InfoCard({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4">
-      <p className="text-xs text-gray-500 mb-1">{label}</p>
-      <p className="font-semibold text-gray-900">{value}</p>
-    </div>
-  )
-}
-
-function StatusActions({ estimateId, currentStatus }: { estimateId: string; currentStatus: EstimateStatus }) {
-  if (currentStatus === 'draft') {
-    return (
-      <form action={`/api/estimates/${estimateId}/status`} method="POST">
-        <input type="hidden" name="status" value="sent" />
-        <button
-          type="submit"
-          className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-        >
-          <Send size={15} />
-          送付済みにする
-        </button>
-      </form>
-    )
-  }
-  if (currentStatus === 'sent') {
-    return (
-      <div className="flex gap-2">
-        <form action={`/api/estimates/${estimateId}/status`} method="POST">
-          <input type="hidden" name="status" value="approved" />
-          <button type="submit" className="flex items-center gap-2 bg-green-600 hover:bg-green-700 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors">
-            <CheckCircle size={15} /> 承認
-          </button>
-        </form>
-        <form action={`/api/estimates/${estimateId}/status`} method="POST">
-          <input type="hidden" name="status" value="rejected" />
-          <button type="submit" className="flex items-center gap-2 bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg text-sm font-medium transition-colors">
-            <XCircle size={15} /> 却下
-          </button>
-        </form>
-      </div>
-    )
-  }
-  return null
 }

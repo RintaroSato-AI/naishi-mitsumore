@@ -1,13 +1,12 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { useForm, useFieldArray } from 'react-hook-form'
 import { PlusCircle, Save, ChevronLeft } from 'lucide-react'
 import Link from 'next/link'
-import { createClient } from '@/lib/supabase/client'
-import { CATEGORY_LABELS, type EstimateFormData, type Customer } from '@/types'
-import { calcItemAmount, calcTotals } from '@/lib/utils/estimate'
+import { CATEGORY_LABELS, type EstimateFormData } from '@/types'
+import { calcTotals } from '@/lib/utils/estimate'
 import ItemRow from '@/components/estimates/ItemRow'
 import TotalSummary from '@/components/estimates/TotalSummary'
 
@@ -21,19 +20,24 @@ const DEFAULT_ITEM = {
   notes: '',
 }
 
+function generateId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2)
+}
+
+function generateEstimateNumber() {
+  const year = new Date().getFullYear()
+  const stored = JSON.parse(localStorage.getItem('estimates') || '[]')
+  const seq = (stored.length + 1).toString().padStart(4, '0')
+  return `${year}-${seq}`
+}
+
 export default function NewEstimatePage() {
   const router = useRouter()
-  const [customers, setCustomers] = useState<Customer[]>([])
-  const [isNewCustomer, setIsNewCustomer] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
+  const [isNewCustomer, setIsNewCustomer] = useState(true)
 
   const {
-    register,
-    control,
-    handleSubmit,
-    watch,
-    setValue,
+    register, control, handleSubmit, watch, setValue,
     formState: { errors },
   } = useForm<EstimateFormData>({
     defaultValues: {
@@ -51,84 +55,46 @@ export default function NewEstimatePage() {
   const taxRate = watch('tax_rate')
   const { subtotal, taxAmount, total } = calcTotals(watchItems || [], Number(taxRate))
 
-  // 顧客一覧取得
-  useEffect(() => {
-    const supabase = createClient()
-    supabase.from('customers').select('*').order('name').then(({ data }) => {
-      if (data) setCustomers(data as Customer[])
-    })
-  }, [])
-
-  async function onSubmit(data: EstimateFormData) {
+  function onSubmit(data: EstimateFormData) {
     setSaving(true)
-    setError(null)
     try {
-      const supabase = createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('未ログイン')
+      const existing = JSON.parse(localStorage.getItem('estimates') || '[]')
+      const estimateNumber = generateEstimateNumber()
+      const id = generateId()
 
-      // 新規顧客の場合は先に登録
-      let customerId = data.customer_id
-      if (isNewCustomer && data.customer_name) {
-        const { data: newCust, error: custErr } = await supabase
-          .from('customers')
-          .insert({ name: data.customer_name, address: data.customer_address, phone: data.customer_phone })
-          .select('id')
-          .single()
-        if (custErr) throw custErr
-        customerId = newCust.id
+      const newEstimate = {
+        id,
+        estimate_number: estimateNumber,
+        customer_name: data.customer_name || '',
+        customer_address: data.customer_address || '',
+        customer_phone: data.customer_phone || '',
+        title: data.title,
+        status: 'draft',
+        issue_date: data.issue_date,
+        expiry_date: data.expiry_date,
+        notes: data.notes || '',
+        tax_rate: data.tax_rate,
+        subtotal,
+        tax_amount: taxAmount,
+        total_amount: total,
+        items: data.items.map((item, i) => ({
+          id: generateId(),
+          sort_order: i,
+          ...item,
+          amount: Math.round(item.quantity * item.unit_price),
+        })),
+        created_at: new Date().toISOString(),
       }
 
-      // 見積もり番号生成
-      const { data: numData } = await supabase.rpc('generate_estimate_number')
-      const estimateNumber = numData ?? `${new Date().getFullYear()}-0001`
-
-      // 見積もり本体を登録
-      const { data: est, error: estErr } = await supabase
-        .from('estimates')
-        .insert({
-          estimate_number: estimateNumber,
-          customer_id: customerId || null,
-          title: data.title,
-          status: 'draft',
-          issue_date: data.issue_date,
-          expiry_date: data.expiry_date,
-          notes: data.notes,
-          subtotal,
-          tax_rate: data.tax_rate,
-          tax_amount: taxAmount,
-          total_amount: total,
-          created_by: user.id,
-        })
-        .select('id')
-        .single()
-      if (estErr) throw estErr
-
-      // 明細を登録
-      const items = data.items.map((item, i) => ({
-        estimate_id: est.id,
-        sort_order: i,
-        category: item.category,
-        item_name: item.item_name,
-        spec: item.spec || null,
-        unit: item.unit,
-        quantity: item.quantity,
-        unit_price: item.unit_price,
-        notes: item.notes || null,
-      }))
-      const { error: itemsErr } = await supabase.from('estimate_items').insert(items)
-      if (itemsErr) throw itemsErr
-
-      router.push(`/estimates/${est.id}`)
-    } catch (e: any) {
-      setError(e.message || '保存に失敗しました')
+      localStorage.setItem('estimates', JSON.stringify([newEstimate, ...existing]))
+      router.push(`/estimates/${id}`)
+    } catch (e) {
       setSaving(false)
     }
   }
 
   return (
     <div className="max-w-6xl mx-auto">
-      {/* ヘッダー */}
       <div className="flex items-center gap-4 mb-6">
         <Link href="/estimates" className="text-gray-400 hover:text-gray-700 transition-colors">
           <ChevronLeft size={20} />
@@ -141,7 +107,6 @@ export default function NewEstimatePage() {
         <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
           <h2 className="text-base font-semibold text-gray-800 mb-4 pb-2 border-b border-gray-100">基本情報</h2>
           <div className="grid grid-cols-2 gap-4">
-            {/* 見積もりタイトル */}
             <div className="col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">
                 見積もりタイトル <span className="text-red-500">*</span>
@@ -154,57 +119,28 @@ export default function NewEstimatePage() {
               {errors.title && <p className="text-red-500 text-xs mt-1">{errors.title.message}</p>}
             </div>
 
-            {/* 顧客選択 */}
+            {/* 顧客情報 */}
             <div className="col-span-2">
-              <label className="block text-sm font-medium text-gray-700 mb-1">顧客</label>
-              <div className="flex gap-3 mb-2">
-                <button
-                  type="button"
-                  onClick={() => setIsNewCustomer(false)}
-                  className={`text-sm px-3 py-1 rounded-full border transition-colors ${!isNewCustomer ? 'bg-blue-600 text-white border-blue-600' : 'text-gray-600 border-gray-300 hover:border-blue-400'}`}
-                >
-                  既存顧客から選ぶ
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setIsNewCustomer(true)}
-                  className={`text-sm px-3 py-1 rounded-full border transition-colors ${isNewCustomer ? 'bg-blue-600 text-white border-blue-600' : 'text-gray-600 border-gray-300 hover:border-blue-400'}`}
-                >
-                  新規顧客を入力
-                </button>
+              <label className="block text-sm font-medium text-gray-700 mb-2">顧客情報</label>
+              <div className="grid grid-cols-3 gap-3">
+                <input
+                  {...register('customer_name')}
+                  placeholder="顧客名"
+                  className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+                <input
+                  {...register('customer_address')}
+                  placeholder="住所"
+                  className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+                <input
+                  {...register('customer_phone')}
+                  placeholder="電話番号"
+                  className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
+                />
               </div>
-              {!isNewCustomer ? (
-                <select
-                  {...register('customer_id')}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm bg-white"
-                >
-                  <option value="">（顧客なし）</option>
-                  {customers.map(c => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              ) : (
-                <div className="grid grid-cols-3 gap-3">
-                  <input
-                    {...register('customer_name', { required: isNewCustomer })}
-                    placeholder="顧客名 *"
-                    className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  />
-                  <input
-                    {...register('customer_address')}
-                    placeholder="住所"
-                    className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  />
-                  <input
-                    {...register('customer_phone')}
-                    placeholder="電話番号"
-                    className="border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500 text-sm"
-                  />
-                </div>
-              )}
             </div>
 
-            {/* 発行日・有効期限・消費税 */}
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">発行日</label>
               <input
@@ -233,7 +169,6 @@ export default function NewEstimatePage() {
               </select>
             </div>
 
-            {/* 備考 */}
             <div className="col-span-2">
               <label className="block text-sm font-medium text-gray-700 mb-1">備考・特記事項</label>
               <textarea
@@ -248,9 +183,7 @@ export default function NewEstimatePage() {
 
         {/* 明細テーブル */}
         <section className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
-          <h2 className="text-base font-semibold text-gray-800 mb-4 pb-2 border-b border-gray-100">
-            工事明細
-          </h2>
+          <h2 className="text-base font-semibold text-gray-800 mb-4 pb-2 border-b border-gray-100">工事明細</h2>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -291,7 +224,6 @@ export default function NewEstimatePage() {
             行を追加
           </button>
 
-          {/* 合計 */}
           <div className="mt-6">
             <TotalSummary
               subtotal={subtotal}
@@ -302,14 +234,6 @@ export default function NewEstimatePage() {
           </div>
         </section>
 
-        {/* エラー表示 */}
-        {error && (
-          <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-red-700 text-sm">
-            {error}
-          </div>
-        )}
-
-        {/* 送信ボタン */}
         <div className="flex justify-end gap-3 pb-8">
           <Link
             href="/estimates"
@@ -323,7 +247,7 @@ export default function NewEstimatePage() {
             className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold px-6 py-2.5 rounded-lg transition-colors text-sm"
           >
             <Save size={16} />
-            {saving ? '保存中...' : '下書き保存'}
+            {saving ? '保存中...' : '保存する'}
           </button>
         </div>
       </form>

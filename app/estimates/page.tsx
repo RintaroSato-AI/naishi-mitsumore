@@ -1,6 +1,18 @@
+'use client'
+
+import { useEffect, useState } from 'react'
 import Link from 'next/link'
+import { formatCurrency, formatDate } from '@/lib/utils/estimate'
+import { STATUS_LABELS, STATUS_COLORS, type EstimateStatus } from '@/types'
 
 export default function EstimatesPage() {
+  const [estimates, setEstimates] = useState<any[]>([])
+
+  useEffect(() => {
+    const stored = JSON.parse(localStorage.getItem('estimates') || '[]')
+    setEstimates(stored)
+  }, [])
+
   return (
     <div>
       <div className="flex items-center justify-between mb-8">
@@ -14,16 +26,52 @@ export default function EstimatesPage() {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-100">
-        <div className="px-6 py-16 text-center text-gray-400">
-          <p className="text-lg mb-2">見積もりがまだありません</p>
-          <p className="text-sm mb-6">Supabaseを接続すると見積もりデータが表示されます</p>
-          <Link
-            href="/estimates/new"
-            className="inline-block bg-blue-600 hover:bg-blue-700 text-white font-semibold px-6 py-2.5 rounded-lg transition-colors text-sm"
-          >
-            新規見積もりを作成する
-          </Link>
-        </div>
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+            <tr>
+              <th className="px-6 py-3 text-left">見積もり番号</th>
+              <th className="px-6 py-3 text-left">タイトル</th>
+              <th className="px-6 py-3 text-left">顧客名</th>
+              <th className="px-6 py-3 text-left">発行日</th>
+              <th className="px-6 py-3 text-right">合計金額</th>
+              <th className="px-6 py-3 text-center">ステータス</th>
+              <th className="px-6 py-3"></th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-50">
+            {estimates.map(est => (
+              <tr key={est.id} className="hover:bg-gray-50 transition-colors">
+                <td className="px-6 py-4 font-mono text-blue-600">
+                  <Link href={`/estimates/${est.id}`} className="hover:underline">
+                    {est.estimate_number}
+                  </Link>
+                </td>
+                <td className="px-6 py-4 font-medium text-gray-800">{est.title}</td>
+                <td className="px-6 py-4 text-gray-600">{est.customer_name || '—'}</td>
+                <td className="px-6 py-4 text-gray-600">{formatDate(est.issue_date)}</td>
+                <td className="px-6 py-4 text-right font-semibold">{formatCurrency(est.total_amount)}</td>
+                <td className="px-6 py-4 text-center">
+                  <span className={`px-2 py-1 rounded-full text-xs font-medium ${STATUS_COLORS[est.status as EstimateStatus]}`}>
+                    {STATUS_LABELS[est.status as EstimateStatus]}
+                  </span>
+                </td>
+                <td className="px-6 py-4 text-right">
+                  <Link href={`/estimates/${est.id}`} className="text-blue-600 hover:underline text-xs">詳細 →</Link>
+                </td>
+              </tr>
+            ))}
+            {!estimates.length && (
+              <tr>
+                <td colSpan={7} className="px-6 py-16 text-center text-gray-400">
+                  <p className="mb-4">見積もりがまだありません</p>
+                  <Link href="/estimates/new" className="bg-blue-600 hover:bg-blue-700 text-white font-semibold px-4 py-2 rounded-lg text-sm transition-colors">
+                    新規見積もりを作成する
+                  </Link>
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </div>
   )
